@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-03
+
 ### Added
 
 - **npm package `@guionardo/gs-secrets`**: installs a zero-dependency shim
@@ -16,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow (`NPM_TOKEN` secret; prereleases use the `next` dist-tag).
 - **Binary-only release archives**: installers extract exactly the
   executable; README/LICENSE are no longer bundled inside the archives.
+
+### Changed
+
+- GitHub Actions upgraded to Node 24 builds (`actions/checkout@v7`,
+  `actions/setup-go@v7`), removing the "Node.js 20 is deprecated"
+  annotations.
 
 ## [0.3.0] - 2026-10-03
 
@@ -124,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release: `--set key=value [--ttl]` and `--get key` over an
   encrypted file vault, with machine-ID-derived key and AES-CTR encryption.
 
+[0.4.0]: https://github.com/guionardo/gs-secrets/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guionardo/gs-secrets/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/guionardo/gs-secrets/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/guionardo/gs-secrets/releases/tag/v0.1.0
