@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-03
+
+### Added
+
+- **`Store.GetE(key)`** in `pkg/store`: like `Get` (`value, exists, err`)
+  but surfaces vault access errors (lock acquisition, unreadable vault,
+  decrypt/decode failures, missing master key file) instead of suppressing
+  them, so clients can distinguish "credential not configured" from
+  "vault unavailable or damaged". `Get` is now implemented on top of `GetE`
+  and keeps its documented behavior; errors never contain stored values.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added
@@ -132,6 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release: `--set key=value [--ttl]` and `--get key` over an
   encrypted file vault, with machine-ID-derived key and AES-CTR encryption.
 
+[0.5.0]: https://github.com/guionardo/gs-secrets/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/guionardo/gs-secrets/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guionardo/gs-secrets/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/guionardo/gs-secrets/compare/v0.1.0...v0.2.0
