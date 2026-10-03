@@ -1,0 +1,58 @@
+name: Release
+
+# Creates a versioned GitHub release whenever a semantic version tag
+# (v1.2.3, or a prerelease like v1.2.3-rc.1) is pushed:
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# GoReleaser builds, archives and verifies the binaries, generates the
+# checksums file and the release notes, and publishes everything to GitHub
+# Releases. Prerelease tags (containing a dash) are published as
+# prereleases. See .goreleaser.yml for the build matrix.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      - name: Test (race detector)
+        run: go test -race ./...
+
+  goreleaser:
+    name: Release ${{ github.ref_name }}
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so GoReleaser can build the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with contents:write on guionardo/homebrew-tap — the default
+          # GITHUB_TOKEN cannot write to another repository.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

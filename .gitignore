@@ -1,0 +1,24 @@
+# Binaries
+/bin/
+/dist/
+/gs-secrets
+*.exe
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local secrets vault (never commit)
+*.store
+.gs-secrets.key

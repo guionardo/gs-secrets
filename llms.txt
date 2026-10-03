@@ -1,0 +1,68 @@
+# gs-secrets
+
+> Poor-man's secret vault: a single-file CLI to store and retrieve API keys,
+> passwords, and other secrets in an AES-256-GCM encrypted local vault.
+
+## Documentation
+
+- [README.md](README.md) — overview, installation, usage, and examples
+- [SECURITY.md](SECURITY.md) — threat model, file permissions, encryption details
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and PR process
+- [CHANGELOG.md](CHANGELOG.md) — version history (Keep a Changelog)
+- [LICENSE](LICENSE) — MIT
+
+## Quick start
+
+```bash
+go install github.com/guionardo/gs-secrets/cmd/gs-secrets@latest
+
+gs-secrets --set github_token=ghp_xxxxxxxx --ttl 24h
+gs-secrets --get github_token
+gs-secrets --list
+gs-secrets --delete github_token
+```
+
+## Installation
+
+- macOS: `brew install guionardo/tap/gs-secrets`
+- Windows: `irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | iex`
+- Other: download the release archive for your platform and verify against `checksums.txt`
+
+## Commands
+
+- `gs-secrets --set key=value [--ttl DURATION]` — store a secret (optional expiry)
+- `gs-secrets --get key [--output FILE]` — print a secret
+- `gs-secrets --delete key` — remove a secret
+- `gs-secrets --list` — list keys
+- `gs-secrets --version` — print version
+
+Common flags: `--store PATH` (vault file), `--keyfile PATH` (master key
+file), `--verbose` (diagnostics to stderr).
+
+## Project layout
+
+- `cmd/gs-secrets/` — thin entry point
+- `internal/app/` — CLI logic: flag parsing, command dispatch
+- `internal/store/` — encrypted vault: AES-256-GCM, key-file management
+
+## Security model (summary)
+
+- AES-256-GCM authenticated encryption; random 32-byte key in
+  `.gs-secrets.key` (0600) beside the vault (0600), directory 0700.
+- Confidentiality rests on OS file permissions; backing up the key file is
+  required for recovery. See SECURITY.md.
+
+## Build & test
+
+```bash
+make build     # bin/gs-secrets
+make test      # go test -race -cover ./...
+make lint      # golangci-lint run ./...
+make vulncheck # govulncheck
+```
+
+## Release process
+
+Push a `v*` tag (e.g. `v1.2.3`); `.github/workflows/release.yml` builds
+binaries for linux/darwin/windows (amd64+arm64), verifies the version,
+generates checksums and a changelog, and publishes the GitHub release.

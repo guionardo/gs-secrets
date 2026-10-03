@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - gosec
+    - misspell
+    - revive
+    - gocyclo
+  settings:
+    errcheck:
+      # CLI output writes: a failed write to stdout/stderr is surfaced by
+      # the OS (e.g. EPIPE) and is not actionable at the call site.
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+    goimports:
+      local-prefixes:
+        - github.com/guionardo/gs-secrets
+    revive:
+      rules:
+        - name: exported
+    gocyclo:
+      min-complexity: 15
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/guionardo/gs-secrets
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
