@@ -6,8 +6,8 @@ merge in under ten minutes.
 ## Prerequisites
 
 - Go 1.27 or newer (see `go.mod`)
-- [golangci-lint](https://golangci-lint.run/) v2.12 or newer
-  (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
+- [golangci-lint](https://golangci-lint.run/) v2.14 or newer
+  (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`)
 
 ## Development workflow
 
