@@ -25,6 +25,7 @@ gs-secrets --delete github_token
 
 ## Installation
 
+- Node.js: `npm install -g @guionardo/gs-secrets` (or `npx @guionardo/gs-secrets`)
 - Windows: `irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | iex`
 - Other: download the release archive for your platform and verify against `checksums.txt`
 

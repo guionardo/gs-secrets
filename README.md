@@ -40,6 +40,16 @@ irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | ie
 
 Open a new terminal afterwards, then `gs-secrets --version`.
 
+**Node.js / npm** — installs a zero-dependency shim that downloads the
+platform binary on first use (checksum-verified, cached, no `postinstall`
+script, works with pnpm/yarn/`--ignore-scripts`):
+
+```bash
+npm install -g @guionardo/gs-secrets
+# or without installing:
+npx @guionardo/gs-secrets --version
+```
+
 **Linux / macOS / manual** — download the binary for your platform from the
 [releases page](https://github.com/guionardo/gs-secrets/releases) and verify
 its checksum against `checksums.txt` attached to the release.

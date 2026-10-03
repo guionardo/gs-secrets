@@ -1,0 +1,31 @@
+{
+  "name": "@guionardo/gs-secrets",
+  "version": "0.0.0",
+  "description": "Poor-man's secret vault: encrypted, file-based storage for API keys and passwords.",
+  "license": "MIT",
+  "keywords": [
+    "secrets",
+    "vault",
+    "encryption",
+    "password-manager",
+    "cli"
+  ],
+  "bin": {
+    "gs-secrets": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guionardo/gs-secrets"
+  },
+  "bugs": {
+    "url": "https://github.com/guionardo/gs-secrets/issues"
+  }
+}

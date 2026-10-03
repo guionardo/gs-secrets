@@ -38,6 +38,12 @@ archives:
       - goos: windows
         formats:
           - zip
+    # Binary-only archives: installers (install.ps1, npm shim) extract the
+    # executable into a cache directory, so no extra files. GoReleaser adds
+    # README/LICENSE when the file list is empty, so use a non-matching glob
+    # (documented workaround).
+    files:
+      - none*
 
 checksum:
   name_template: checksums.txt

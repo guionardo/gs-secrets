@@ -83,6 +83,12 @@ git push origin v1.2.3
 Stable tags additionally publish the Windows installer entry point:
 `install.ps1` in the repository root stays current with `main`.
 
+Stable tags also publish the npm package `@guionardo/gs-secrets` (a
+zero-dependency shim that downloads the platform binary from the GitHub
+release on first use). This requires the `NPM_TOKEN` repository secret
+(an npm access token with publish rights for the `@guionardo` scope).
+Prerelease tags are published with the `next` dist-tag.
+
 Prerelease tags containing a `-` (e.g. `v1.2.3-rc.1`) are published as
 prereleases. To test a release locally without publishing:
 

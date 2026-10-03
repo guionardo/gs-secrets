@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **npm package `@guionardo/gs-secrets`**: installs a zero-dependency shim
+  that downloads the platform binary from the matching GitHub release on
+  first use (SHA-256 verified, cached; no `postinstall`, so it works with
+  pnpm/yarn/`--ignore-scripts`). Published automatically by the release
+  workflow (`NPM_TOKEN` secret; prereleases use the `next` dist-tag).
+- **Binary-only release archives**: installers extract exactly the
+  executable; README/LICENSE are no longer bundled inside the archives.
+
 ## [0.3.0] - 2026-10-03
 
 ### Added
