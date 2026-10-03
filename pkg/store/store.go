@@ -146,12 +146,24 @@ func (s *Store) LockFile() string {
 // Get returns the value for key and whether it exists. Expired secrets are
 // treated as missing and removed from the in-memory copy; the cleanup is
 // persisted on the next Set or Delete.
+//
+// Vault access errors (lock acquisition, read, decrypt, decode) are
+// suppressed, so Get cannot distinguish "key missing or expired" from
+// "vault unavailable or damaged"; use GetE to surface them.
 func (s *Store) Get(key string) (string, bool) {
+	value, exists, _ := s.GetE(key)
+	return value, exists
+}
+
+// GetE is like Get but also reports errors that prevented reading the
+// vault: lock acquisition failures, unreadable vault files, decryption or
+// decoding failures, and a missing master key file. It returns exists=false
+// and err=nil when key is absent or expired. Errors never contain stored
+// secret values.
+func (s *Store) GetE(key string) (value string, exists bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	found := false
-	var value string
-	_ = s.withFileLock(func() error {
+	err = s.withFileLock(func() error {
 		if err := s.load(); err != nil {
 			return err
 		}
@@ -163,10 +175,10 @@ func (s *Store) Get(key string) (string, bool) {
 			delete(s.secrets, key)
 			return nil
 		}
-		value, found = secret.Value, true
+		value, exists = secret.Value, true
 		return nil
 	})
-	return value, found
+	return value, exists, err
 }
 
 // Set stores value under key, replacing any existing entry. A positive ttl
@@ -282,6 +294,11 @@ func (s *Store) Rekey() error {
 // vault would be unrecoverable. Blobs without the format header are treated
 // as the legacy pre-header layout and upgraded on the next save.
 func (s *Store) load() error {
+	if _, err := os.Stat(s.storeFile); err == nil {
+		if _, err := os.Stat(s.keyFile); errors.Is(err, fs.ErrNotExist) {
+			return ErrMasterKeyMissing
+		}
+	}
 	content, err := os.ReadFile(s.storeFile) // #nosec G304 -- path comes from --store flag or the default config dir
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

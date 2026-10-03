@@ -74,6 +74,143 @@ func TestTTLExpiry(t *testing.T) {
 	assert.Empty(t, value)
 }
 
+func TestGetEExistingKey(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Set("key1", "value1", 0))
+
+	value, exists, err := s.GetE("key1")
+	assert.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, "value1", value)
+}
+
+func TestGetEMissingKey(t *testing.T) {
+	s := newTestStore(t)
+
+	value, exists, err := s.GetE("missing")
+	assert.NoError(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetEExpiredKey(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Set("ephemeral", "value", 10*time.Millisecond))
+	time.Sleep(100 * time.Millisecond)
+
+	value, exists, err := s.GetE("ephemeral")
+	assert.NoError(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetETamperedVault(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("key1", "value1", 0))
+
+	content, err := os.ReadFile(vaultFile) // #nosec G304 G703 -- test reads/writes its own temp vault
+	require.NoError(t, err)
+	content[len(content)-1] ^= 0xFF
+	require.NoError(t, os.WriteFile(vaultFile, content, 0o600))
+
+	value, exists, err := s.GetE("key1")
+	assert.Error(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetEVaultWithoutKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("key1", "value1", 0))
+
+	require.NoError(t, os.Remove(filepath.Join(dir, ".gs-secrets.key")))
+
+	value, exists, err := s.GetE("key1")
+	assert.ErrorIs(t, err, store.ErrMasterKeyMissing)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetELockFailure(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Set("key1", "value1", 0))
+	// A directory where the lock file should be: opening it must fail.
+	require.NoError(t, os.Remove(s.LockFile()))
+	require.NoError(t, os.Mkdir(s.LockFile(), 0o700))
+
+	value, exists, err := s.GetE("key1")
+	assert.Error(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetEReadPermissionFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("on Windows a user-restricted DACL is enforced instead of mode bits")
+	}
+	s := newTestStore(t)
+	require.NoError(t, s.Set("key1", "value1", 0))
+	require.NoError(t, os.Chmod(s.VaultFile(), 0o000))
+	defer func() { _ = os.Chmod(s.VaultFile(), 0o600) }()
+
+	value, exists, err := s.GetE("key1")
+	assert.Error(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+}
+
+func TestGetEErrorsDoNotLeakValues(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("key1", "super-secret-value-42", 0))
+
+	content, err := os.ReadFile(vaultFile) // #nosec G304 G703 -- test reads/writes its own temp vault
+	require.NoError(t, err)
+	content[len(content)-1] ^= 0xFF
+	require.NoError(t, os.WriteFile(vaultFile, content, 0o600))
+
+	_, _, err = s.GetE("key1")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "super-secret-value-42")
+}
+
+func TestGetEDecodeErrorDoesNotLeak(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("key1", "value1", 0))
+
+	// Craft a header-versioned vault that decrypts fine but holds non-JSON:
+	// decoding must fail without echoing the embedded plaintext in the error.
+	key, err := os.ReadFile(filepath.Join(dir, ".gs-secrets.key")) // #nosec G304 G703 -- test temp vault
+	require.NoError(t, err)
+	block, err := aes.NewCipher(key)
+	require.NoError(t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(t, err)
+	nonce := make([]byte, gcm.NonceSize())
+	_, err = rand.Read(nonce)
+	require.NoError(t, err)
+	sealed := gcm.Seal(nonce, nonce, []byte("not json super-secret-value-42"), nil)
+	blob := append(append([]byte("GSSEC"), 0x01, 0x01), sealed...)
+	require.NoError(t, os.WriteFile(vaultFile, blob, 0o600))
+
+	value, exists, err := s.GetE("key1")
+	assert.Error(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, value)
+	assert.NotContains(t, err.Error(), "super-secret-value-42")
+}
+
 func TestListSortedAndExcludesExpired(t *testing.T) {
 	s := newTestStore(t)
 	require.NoError(t, s.Set("zeta", "1", 0))

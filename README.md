@@ -136,6 +136,7 @@ if err := s.Set("api_key", "secret", 24*time.Hour); err != nil {
     log.Fatal(err)
 }
 value, ok := s.Get("api_key") // ok=false if missing or expired
+value, ok, err = s.GetE("api_key") // like Get, but surfaces vault access errors (lock, read, decrypt, decode)
 if err := s.Rekey(); err != nil { // rotate the master key
     log.Fatal(err)
 }

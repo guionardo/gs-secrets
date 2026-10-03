@@ -18,6 +18,7 @@ if err != nil { /* vault unreadable or permissions cannot be enforced */ }
 
 err = s.Set(key, value, ttl) // ttl=0 means never expires
 value, ok := s.Get(key)      // ok=false if missing or expired
+value, ok, err = s.GetE(key) // like Get, but surfaces vault access errors
 err = s.Delete(key)
 keys := s.List()             // sorted; expired keys excluded
 err = s.Rekey()              // rotate the master key in place
@@ -27,7 +28,8 @@ err = s.Rekey()              // rotate the master key in place
 | --- | --- |
 | `New(storeFile, ...Option)` | Opens (or creates) the vault, loads/generates the master key, hardens permissions, verifies vault/key decryption state. Fails with `ErrMasterKeyMissing` if the vault exists but the key file does not. |
 | `WithKeyFile(path)` | Overrides the key file location (default `<vault dir>/.gs-secrets.key`). |
-| `Get(key)` | Returns the value and whether it exists. Never errors on missing keys. |
+| `Get(key)` | Returns the value and whether it exists. Never errors on missing keys; suppresses vault access errors. |
+| `GetE(key)` | Like `Get` (`value, exists, err`) but reports vault access errors: lock acquisition, read, decrypt/decode, or a missing master key file. `exists=false, err=nil` when the key is absent or expired. Errors never contain stored values. |
 | `Set(key, value, ttl)` | Upserts a secret with optional expiry (millisecond precision). |
 | `Delete(key)` | Removes a key; deleting a missing key is not an error. |
 | `List()` | Sorted key names, never values. |
