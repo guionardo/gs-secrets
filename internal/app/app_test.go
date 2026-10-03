@@ -1,3 +1,4 @@
+//nolint:gosec // tests only read and write files inside t.TempDir()
 package app_test
 
 import (
@@ -125,6 +126,32 @@ func TestVerboseGoesToStderr(t *testing.T) {
 	_, stderr, err := runApp(t, append(newArgs(dir), "--set", "k=v", "--verbose")...)
 	require.NoError(t, err)
 	assert.Contains(t, stderr, "secret set: k")
+}
+
+func TestRekeyCommand(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, runErr(t, append(newArgs(dir), "--set", "k=v")))
+	oldKey, err := os.ReadFile(filepath.Join(dir, "key"))
+	require.NoError(t, err)
+
+	require.NoError(t, runErr(t, append(newArgs(dir), "--rekey")))
+
+	newKey, err := os.ReadFile(filepath.Join(dir, "key"))
+	require.NoError(t, err)
+	assert.NotEqual(t, oldKey, newKey)
+	_, err = os.Stat(filepath.Join(dir, "key.bak"))
+	assert.True(t, os.IsNotExist(err), "rekey backup should be removed")
+
+	stdout, _, err := runApp(t, append(newArgs(dir), "--get", "k")...)
+	require.NoError(t, err)
+	assert.Equal(t, "v\n", stdout)
+}
+
+func TestRekeyWithoutVault(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runApp(t, append(newArgs(dir), "--rekey")...)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no vault found")
 }
 
 func TestParseErrors(t *testing.T) {

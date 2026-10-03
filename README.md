@@ -60,6 +60,7 @@ gs-secrets --set key=value [--ttl DURATION] [--store PATH] [--keyfile PATH]
 gs-secrets --get key [--output FILE] [--store PATH] [--keyfile PATH]
 gs-secrets --delete key [--store PATH] [--keyfile PATH]
 gs-secrets --list [--store PATH] [--keyfile PATH]
+gs-secrets --rekey [--store PATH] [--keyfile PATH]
 gs-secrets --version
 ```
 
@@ -69,6 +70,7 @@ gs-secrets --version
 | `--get key` | Print the secret value to stdout (or `--output FILE`). |
 | `--delete key` | Remove a secret. Deleting a missing key is not an error. |
 | `--list` | List stored keys, sorted, never values. |
+| `--rekey` | Rotate the master key and re-encrypt the vault (backup of the old key kept as `.bak` until completion). |
 | `--ttl DURATION` | Time to live for `--set`, e.g. `1h`, `30m`, `90s`. `0` (default) means never expires. |
 | `--store PATH` | Vault file. Default: `<user config dir>/gs-secrets/.store`. |
 | `--keyfile PATH` | Master key file. Default: `<vault dir>/.gs-secrets.key`. |
@@ -94,18 +96,45 @@ gs-secrets --get api_key | curl -H "Authorization: Bearer $(cat)" ...
 gs-secrets --get api_key --output /tmp/key
 ```
 
+## Using as a library
+
+The vault is also a public Go library (`pkg/store`), importable from other
+projects and repositories:
+
+```go
+import "github.com/guionardo/gs-secrets/pkg/store"
+
+s, err := store.New("/path/to/vault/.store") // generates the master key on first use
+if err != nil {
+    log.Fatal(err)
+}
+if err := s.Set("api_key", "secret", 24*time.Hour); err != nil {
+    log.Fatal(err)
+}
+value, ok := s.Get("api_key") // ok=false if missing or expired
+if err := s.Rekey(); err != nil { // rotate the master key
+    log.Fatal(err)
+}
+```
+
+All operations reload the vault file, so multiple processes share it safely.
+The full threat model in [SECURITY.md](./SECURITY.md) applies to library use
+too.
+
 ## How it works
 
 The vault is a JSON map of secrets encrypted with **AES-256-GCM** and stored
-in a single file. Each secret carries an optional expiration timestamp
-(millisecond precision).
+in a single file with a small format header (magic + version + cipher id).
+Each secret carries an optional expiration timestamp (millisecond precision).
 
 The master key is a random 32-byte value kept in its own key file
-(`.gs-secrets.key`, mode `0600`) next to the vault. Both files live in a
-directory created with mode `0700`. See [SECURITY.md](./SECURITY.md) for the
-full threat model — in short: **the vault is only as safe as your file
-permissions**. The key file is generated on first use and never leaves the
-machine.
+(`.gs-secrets.key`) next to the vault. Permissions are **enforced** on every
+open: `0600` on Unix, a user-restricted DACL on Windows (where POSIX modes
+are ignored). Writes are atomic (temp file + fsync + rename). `--rekey`
+rotates the key in place with a recoverable backup. See
+[SECURITY.md](./SECURITY.md) for the full threat model — in short: **the
+vault is only as safe as your file permissions**. The key file is generated
+on first use and never leaves the machine.
 
 ## Features
 

@@ -7,33 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
 ### Security
 
 - **Replace the machine-ID-derived master key with a random 32-byte key
   file.** The previous key was derived from the machine serial number /
   machine-id, which is not secret; anyone who could read the machine ID
   could decrypt the vault. The vault now uses a fresh random key in
-  `.gs-secrets.key` (mode `0600`) next to the vault, and refuses to open
-  when the vault exists but the key file is missing.
-
-### Changed
-
-- **Encryption upgraded from AES-CTR to AES-256-GCM.** The ciphertext is
-  now authenticated: any tampering is detected and rejected instead of
-  silently returning corrupted secrets.
-- **Refactored the CLI into a testable `app.Run`** with the entry point
-  moved to `cmd/gs-secrets/main.go`; `main` no longer mutates global state
-  or calls `os.Exit` in library code.
-- **`--get` now prints the secret value** by default (previously it printed
-  nothing unless `--verbose` was set).
-- **Verbose and diagnostic messages go to stderr**, keeping stdout (or
-  `--output FILE`) free for the secret value.
-- TTL expiry now has millisecond precision.
-- The `github.com/guionardo/go` dependency was removed; the project has no
-  runtime dependencies beyond the Go standard library.
+  `.gs-secrets.key` next to the vault, and refuses to open when the vault
+  exists but the key file is missing.
+- **Permissions are now enforced, not requested.** On Unix, vault and key
+  files are chmod'ed to `0600` (directories `0700`) and verified on every
+  open, failing loudly when that is not possible. On Windows, where POSIX
+  modes are ignored by the OS, a user-restricted DACL (current user, SYSTEM,
+  Administrators, protected from inheritance) is enforced and verified via
+  `golang.org/x/sys/windows`.
+- **Atomic writes**: vault and key files are written via temp file + fsync +
+  rename, so a crash never leaves a truncated or corrupted file.
+- **Key memory hygiene**: key bytes are zeroed when they become unreachable
+  in process memory (`runtime.AddCleanup`).
+- **Vault format header** (`GSSEC` magic + version + cipher id): foreign or
+  corrupted blobs fail loudly; v0.1.0 files without the header are still
+  readable and upgraded on the next write.
 
 ### Added
 
+- `--rekey` command: rotates the master key in place, re-encrypting the
+  vault. The previous key is kept as `.gs-secrets.key.bak` until the
+  rotation completes, and decryption failures hint at restoring it after an
+  interrupted rekey.
 - `--list` command: sorted list of stored keys (never values).
 - `--delete key` command: explicit deletion replaces the hidden
   `--set key=` convention.
@@ -53,7 +56,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extracts `gs-secrets.exe` into `%LOCALAPPDATA%\gs-secrets\bin` and adds it
   to the user PATH:
   `irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | iex`
+- **`pkg/store` is now a public library**: moved out of `internal/` so other
+  projects and repositories can import it (`github.com/guionardo/gs-secrets/pkg/store`).
+  The `Store`, `Secret`, `New`, `WithKeyFile`, `Get`, `Set`, `Delete`,
+  `List`, and `Rekey` APIs are exported, documented, and covered by a
+  runnable example.
 - Documentation: README, CONTRIBUTING, SECURITY policy, and this changelog.
+
+### Changed
+
+- **Encryption upgraded from AES-CTR to AES-256-GCM.** The ciphertext is
+  now authenticated: any tampering is detected and rejected instead of
+  silently returning corrupted secrets.
+- **Refactored the CLI into a testable `app.Run`** with the entry point
+  moved to `cmd/gs-secrets/main.go`; `main` no longer mutates global state
+  or calls `os.Exit` in library code.
+- **`--get` now prints the secret value** by default (previously it printed
+  nothing unless `--verbose` was set).
+- **Verbose and diagnostic messages go to stderr**, keeping stdout (or
+  `--output FILE`) free for the secret value.
+- TTL expiry now has millisecond precision.
+- The `github.com/guionardo/go` dependency was removed; the only external
+  dependency is `golang.org/x/sys` (Windows DACL enforcement, Windows only).
 
 ## [0.1.0] - 2026-10-03
 
@@ -61,3 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release: `--set key=value [--ttl]` and `--get key` over an
   encrypted file vault, with machine-ID-derived key and AES-CTR encryption.
+
+[0.2.0]: https://github.com/guionardo/gs-secrets/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/guionardo/gs-secrets/releases/tag/v0.1.0

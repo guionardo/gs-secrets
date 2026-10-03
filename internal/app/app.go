@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/guionardo/gs-secrets/internal/store"
+	"github.com/guionardo/gs-secrets/pkg/store"
 )
 
 // version is the release version, injected at build time with
@@ -25,14 +25,14 @@ import (
 var version = "dev"
 
 // ErrNoCommand is returned when no command flag was given.
-var ErrNoCommand = errors.New("no command specified: use --set, --get, --delete or --list")
+var ErrNoCommand = errors.New("no command specified: use --set, --get, --delete, --list or --rekey")
 
 // ErrMultipleCommands is returned when more than one command flag was given.
-var ErrMultipleCommands = errors.New("specify exactly one command: --set, --get, --delete or --list")
+var ErrMultipleCommands = errors.New("specify exactly one command: --set, --get, --delete, --list or --rekey")
 
 // options holds the parsed flags of a single invocation.
 type options struct {
-	command    string // set | get | delete | list
+	command    string // set | get | delete | list | rekey
 	key        string
 	value      string
 	ttl        time.Duration
@@ -41,6 +41,7 @@ type options struct {
 	outputFile string
 	verbose    bool
 	version    bool
+	rekey      bool
 }
 
 // Run executes the gs-secrets CLI with the given arguments. stdout receives
@@ -113,6 +114,13 @@ func execute(opts *options, s *store.Store, out, stderr io.Writer) error {
 		for _, k := range s.List() {
 			fmt.Fprintln(out, k)
 		}
+	case "rekey":
+		if err := s.Rekey(); err != nil {
+			return err
+		}
+		if opts.verbose {
+			fmt.Fprintf(stderr, "master key rotated\n")
+		}
 	}
 	return nil
 }
@@ -134,6 +142,7 @@ Usage:
   gs-secrets --get key [--output FILE] [--store PATH] [--keyfile PATH]
   gs-secrets --delete key [--store PATH] [--keyfile PATH]
   gs-secrets --list [--store PATH] [--keyfile PATH]
+  gs-secrets --rekey [--store PATH] [--keyfile PATH]
   gs-secrets --version
 
 Flags:
@@ -144,6 +153,7 @@ Flags:
 	fs.StringVar(&getArg, "get", "", "retrieve the secret for a key")
 	fs.StringVar(&deleteArg, "delete", "", "delete the secret for a key")
 	fs.BoolVar(&list, "list", false, "list stored keys")
+	fs.BoolVar(&opts.rekey, "rekey", false, "rotate the master key and re-encrypt the vault")
 	fs.BoolVar(&opts.version, "version", false, "print version and exit")
 	fs.DurationVar(&opts.ttl, "ttl", 0, "time to live for a secret set with --set (e.g. 1h, 30m); 0 means never expire")
 	fs.StringVar(&opts.storeFile, "store", "", "path to the secrets vault (default: <user config dir>/gs-secrets/.store)")
@@ -162,7 +172,7 @@ Flags:
 	if err != nil {
 		return nil, err
 	}
-	if err := validateCommands(setArg != "", getArg != "", deleteArg != "", list); err != nil {
+	if err := validateCommands(setArg != "", getArg != "", deleteArg != "", list, opts.rekey); err != nil {
 		if errors.Is(err, ErrNoCommand) {
 			fs.Usage()
 		}
@@ -179,6 +189,8 @@ Flags:
 		opts.key = deleteArg
 	case list:
 		opts.command = "list"
+	case opts.rekey:
+		opts.command = "rekey"
 	}
 	return opts, nil
 }
@@ -201,9 +213,9 @@ func parseSet(setArg string) (key, value string, err error) {
 }
 
 // validateCommands enforces that exactly one command flag was provided.
-func validateCommands(hasSet, hasGet, hasDelete, hasList bool) error {
+func validateCommands(hasSet, hasGet, hasDelete, hasList, hasRekey bool) error {
 	count := 0
-	for _, present := range []bool{hasSet, hasGet, hasDelete, hasList} {
+	for _, present := range []bool{hasSet, hasGet, hasDelete, hasList, hasRekey} {
 		if present {
 			count++
 		}

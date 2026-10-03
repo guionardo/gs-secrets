@@ -1,6 +1,11 @@
+//nolint:gosec // tests only read and write files inside t.TempDir()
 package store_test
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/guionardo/gs-secrets/internal/store"
+	"github.com/guionardo/gs-secrets/pkg/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {
@@ -172,4 +177,130 @@ func TestCorruptVaultFile(t *testing.T) {
 
 	err := s.Set("key2", "value2", 0)
 	require.Error(t, err)
+}
+
+func TestVaultHasFormatHeader(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Set("key1", "value1", 0))
+	content, err := os.ReadFile(s.VaultFile())
+	require.NoError(t, err)
+	assert.Equal(t, "GSSEC", string(content[:5]))
+}
+
+func TestLegacyVaultFormatIsReadAndUpgraded(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+
+	// Craft a pre-header vault: AES-256-GCM over JSON, no magic bytes.
+	key, err := os.ReadFile(filepath.Join(dir, ".gs-secrets.key"))
+	require.NoError(t, err)
+	plain, err := json.Marshal(map[string]store.Secret{"legacy": {Value: "old"}})
+	require.NoError(t, err)
+	block, err := aes.NewCipher(key)
+	require.NoError(t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(t, err)
+	nonce := make([]byte, gcm.NonceSize())
+	_, err = rand.Read(nonce)
+	require.NoError(t, err)
+	legacyBlob := gcm.Seal(nonce, nonce, plain, nil)
+	require.NoError(t, os.WriteFile(vaultFile, legacyBlob, 0o600))
+
+	value, ok := s.Get("legacy")
+	assert.True(t, ok)
+	assert.Equal(t, "old", value)
+
+	// The next save rewrites the vault with the versioned header.
+	require.NoError(t, s.Set("legacy", "new", 0))
+	content, err := os.ReadFile(vaultFile)
+	require.NoError(t, err)
+	assert.Equal(t, "GSSEC", string(content[:5]))
+	value, ok = s.Get("legacy")
+	assert.True(t, ok)
+	assert.Equal(t, "new", value)
+}
+
+func TestRekeyRotatesKeyAndKeepsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	keyFile := filepath.Join(dir, ".gs-secrets.key")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("k", "v", 0))
+
+	oldKey, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Rekey())
+
+	newKey, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+	assert.NotEqual(t, oldKey, newKey)
+	_, err = os.Stat(keyFile + ".bak")
+	assert.True(t, os.IsNotExist(err), "rekey backup should be removed on success")
+
+	value, ok := s.Get("k")
+	assert.True(t, ok)
+	assert.Equal(t, "v", value)
+
+	// The old key must no longer decrypt the vault.
+	oldKeyFile := filepath.Join(dir, "old.key")
+	require.NoError(t, os.WriteFile(oldKeyFile, oldKey, 0o600))
+	sOld, err := store.New(vaultFile, store.WithKeyFile(oldKeyFile))
+	require.NoError(t, err)
+	_, ok = sOld.Get("k")
+	assert.False(t, ok)
+}
+
+func TestRekeyWithoutVault(t *testing.T) {
+	s := newTestStore(t)
+	err := s.Rekey()
+	assert.ErrorIs(t, err, store.ErrNoVault)
+}
+
+func TestRekeyFailureKeepsOldKey(t *testing.T) {
+	dir := t.TempDir()
+	keyDir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	keyFile := filepath.Join(keyDir, "key")
+	s, err := store.New(vaultFile, store.WithKeyFile(keyFile))
+	require.NoError(t, err)
+	require.NoError(t, s.Set("k", "v", 0))
+	oldKey, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+
+	// Make the key directory read-only so the first rekey write fails.
+	require.NoError(t, os.Chmod(keyDir, 0o500))
+	defer func() { _ = os.Chmod(keyDir, 0o700) }()
+
+	err = s.Rekey()
+	require.Error(t, err)
+
+	restored, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+	assert.Equal(t, oldKey, restored)
+}
+
+func TestInterruptedRekeyHintsRecovery(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	keyFile := filepath.Join(dir, ".gs-secrets.key")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("k", "v", 0))
+	oldKey, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+
+	// Simulate an interrupted rekey: the key file was replaced by a wrong
+	// key while the vault still holds the old one, and the backup remains.
+	require.NoError(t, os.WriteFile(keyFile+".bak", oldKey, 0o600))
+	require.NoError(t, os.WriteFile(keyFile, make([]byte, 32), 0o600))
+
+	s2, err := store.New(vaultFile)
+	require.NoError(t, err)
+	err = s2.Set("k", "v2", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restore the backup")
 }

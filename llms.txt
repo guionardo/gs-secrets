@@ -42,7 +42,7 @@ file), `--verbose` (diagnostics to stderr).
 
 - `cmd/gs-secrets/` — thin entry point
 - `internal/app/` — CLI logic: flag parsing, command dispatch
-- `internal/store/` — encrypted vault: AES-256-GCM, key-file management
+- `pkg/store/` — encrypted vault: AES-256-GCM, key-file management
 
 ## Security model (summary)
 

@@ -15,12 +15,17 @@ What the vault protects against:
 - **Tampering**: GCM authenticates the ciphertext. Any modification of the
   vault file is detected and the read fails instead of returning corrupted
   secrets.
+- **Accidental world-readable files**: permissions are enforced, not just
+  requested. On Unix, existing vault/key files are chmod'ed to `0600` (and
+  the directory to `0700`); if that cannot be guaranteed, the tool refuses
+  to run. On Windows, where POSIX modes are ignored by the OS, a
+  user-restricted DACL is enforced instead (see below).
 
 What it does **not** protect against:
 
-- Anyone who can read the key file (`.gs-secrets.key`, mode `0600`) — or the
-  whole config directory (mode `0700`). The key file is random and stored in
-  plaintext by design; copying both files decrypts everything.
+- Anyone who can read the key file (`.gs-secrets.key`) — or the whole config
+  directory. The key file is random and stored in plaintext by design;
+  copying both files decrypts everything.
 - Malware running as your user, which can read both files while you can.
 - Physical theft of the machine while unlocked.
 - Key-file loss: without `.gs-secrets.key`, the vault is **unrecoverable**.
@@ -28,11 +33,20 @@ What it does **not** protect against:
 
 ## Files and permissions
 
-| Path (default) | Mode | Content |
+| Path (default) | Protection | Content |
 | --- | --- | --- |
-| `<user config dir>/gs-secrets/` | `0700` | Vault directory |
-| `<user config dir>/gs-secrets/.store` | `0600` | Encrypted vault |
-| `<user config dir>/gs-secrets/.gs-secrets.key` | `0600` | 32-byte AES-256 master key |
+| `<user config dir>/gs-secrets/` | Unix `0700`; Windows DACL | Vault directory |
+| `<user config dir>/gs-secrets/.store` | Unix `0600`; Windows DACL | Encrypted vault |
+| `<user config dir>/gs-secrets/.gs-secrets.key` | Unix `0600`; Windows DACL | 32-byte AES-256 master key |
+
+### Windows note
+
+Go's `os` package ignores POSIX permission bits on Windows, so modes like
+`0600` alone would not restrict access. `gs-secrets` therefore replaces the
+DACL of the vault, key, and directory files with one that grants access only
+to the current user, SYSTEM, and Administrators, and marks it protected so
+it no longer inherits from the parent directory. Files are verified against
+this policy on every open.
 
 The vault refuses to open with a newly generated key when the vault exists
 but the key file is missing, so a key-file loss surfaces as an error instead
@@ -42,8 +56,27 @@ of silently encrypting data under a fresh, useless key.
 
 - Algorithm: AES-256-GCM (AEAD) from `crypto/aes` + `crypto/cipher`.
 - Nonce: fresh random 96-bit nonce per encryption, `crypto/rand`.
-- Layout on disk: `nonce || ciphertext`.
+- Layout on disk: `GSSEC` magic, format version, cipher-suite id, then
+  `nonce || ciphertext`. Files written by v0.1.0 (no header) are still
+  readable and are upgraded to the header format on the next write.
 - Key: 32 random bytes from `crypto/rand`, generated on first use.
+- Key bytes are zeroed when they become unreachable in process memory.
+
+## Crash safety and key rotation
+
+- Vault and key files are written atomically (temp file + fsync + rename),
+  so an interrupted write never leaves a truncated file.
+- `gs-secrets --rekey` rotates the master key: the vault is re-encrypted
+  with a fresh key and the key file is replaced. The previous key is kept
+  as `.gs-secrets.key.bak` until the rotation completes. If a rekey is
+  interrupted (e.g. power loss between the key-file swap and the vault
+  rewrite), restore the backup manually:
+
+  ```sh
+  mv <vault dir>/.gs-secrets.key.bak <vault dir>/.gs-secrets.key
+  ```
+
+  Decryption errors hint at this recovery step when a backup is present.
 
 ## Reporting a vulnerability
 

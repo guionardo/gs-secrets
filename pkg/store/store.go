@@ -1,9 +1,35 @@
 // Package store implements an encrypted, file-backed secret vault.
 //
-// The vault is a JSON map of secrets encrypted with AES-256-GCM. The
-// encryption key is a random 32-byte master key stored in a separate key
-// file (mode 0600) beside the vault. Security relies on OS file permissions:
-// anyone who can read the key file can decrypt the vault.
+// The vault is a JSON map of secrets encrypted with AES-256-GCM, prefixed
+// with a small format header (see format.go). The encryption key is a
+// random 32-byte master key stored in a separate key file beside the vault.
+// Security relies on OS file permissions: anyone who can read the key file
+// can decrypt the vault. On Unix the key and vault files are forced to mode
+// 0600; on Windows a restrictive DACL is enforced instead (see perms_*.go).
+//
+// This is a public library: other projects can import it and manage their
+// own vaults. A vault is created with New, which generates the master key
+// on first use, and each operation reloads the vault file, so concurrent
+// processes see each other's writes.
+//
+// Example:
+//
+//	s, err := store.New("/path/to/vault/.store")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	if err := s.Set("api_key", "secret", 24*time.Hour); err != nil {
+//		log.Fatal(err)
+//	}
+//	value, ok := s.Get("api_key")
+//	if !ok {
+//		log.Fatal("secret not found or expired")
+//	}
+//	fmt.Println(value)
+//
+// The vault file format is versioned ("GSSEC" header) and the master key can
+// be rotated with Rekey; see SECURITY.md in the repository root for the
+// threat model.
 package store
 
 import (
@@ -32,6 +58,8 @@ var (
 	// ErrMasterKeyMissing is returned when the vault exists but its master
 	// key file does not. The vault is unrecoverable without the key.
 	ErrMasterKeyMissing = errors.New("vault exists but master key file is missing")
+	// ErrNoVault is returned by Rekey when the vault file does not exist yet.
+	ErrNoVault = errors.New("no vault found; nothing to rekey")
 )
 
 // Secret is a single stored value with an optional expiration time.
@@ -67,6 +95,7 @@ func WithKeyFile(keyFile string) Option {
 //
 // New fails with ErrMasterKeyMissing when the vault exists but no key file
 // does, to avoid silently re-keying (and losing access to) existing data.
+// Existing vault, key, and directory permissions are hardened on open.
 func New(storeFile string, opts ...Option) (*Store, error) {
 	s := &Store{
 		storeFile: storeFile,
@@ -76,9 +105,15 @@ func New(storeFile string, opts ...Option) (*Store, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
+	if err := ensureDir(filepath.Dir(s.storeFile)); err != nil {
+		return nil, fmt.Errorf("vault directory: %w", err)
+	}
 	if _, err := os.Stat(s.storeFile); err == nil {
 		if _, err := os.Stat(s.keyFile); errors.Is(err, fs.ErrNotExist) {
 			return nil, ErrMasterKeyMissing
+		}
+		if err := hardenFile(s.storeFile); err != nil {
+			return nil, err
 		}
 	}
 	key, err := loadKey(s.keyFile)
@@ -92,6 +127,11 @@ func New(storeFile string, opts ...Option) (*Store, error) {
 // VaultFile returns the absolute path of the vault file.
 func (s *Store) VaultFile() string {
 	return s.storeFile
+}
+
+// KeyFile returns the absolute path of the master key file.
+func (s *Store) KeyFile() string {
+	return s.keyFile
 }
 
 // Get returns the value for key and whether it exists. Expired secrets are
@@ -165,11 +205,60 @@ func (s *Store) List() []string {
 	return keys
 }
 
+// Rekey rotates the master key: a fresh random key is generated, the vault
+// is re-encrypted with it, and the key file is replaced. The previous key is
+// kept in <key file>.bak until the rotation completes, so an interrupted
+// rekey can be recovered by restoring the backup next to the key file.
+//
+// On failure before the vault is re-encrypted, the old key file is restored
+// automatically.
+func (s *Store) Rekey() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(s.storeFile); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrNoVault
+		}
+		return fmt.Errorf("stat vault: %w", err)
+	}
+	if err := s.load(); err != nil {
+		return fmt.Errorf("read vault before rekey: %w", err)
+	}
+	oldKey := s.key
+	newKey, err := newRandomKey()
+	if err != nil {
+		return fmt.Errorf("generate new master key: %w", err)
+	}
+
+	// Stage 1: persist the backup of the old key, then replace the key file.
+	if err := writeFileAtomic(s.keyFile+".bak", oldKey); err != nil {
+		return fmt.Errorf("backup old master key: %w", err)
+	}
+	if err := hardenFile(s.keyFile + ".bak"); err != nil {
+		return fmt.Errorf("harden key backup: %w", err)
+	}
+	if err := writeFileAtomic(s.keyFile, newKey); err != nil {
+		return fmt.Errorf("write new master key: %w", err)
+	}
+	// Stage 2: re-encrypt the vault with the new key. On failure, restore
+	// the old key so the old vault stays readable.
+	s.key = newKey
+	if err := s.save(); err != nil {
+		s.key = oldKey
+		_ = writeFileAtomic(s.keyFile, oldKey)
+		return fmt.Errorf("re-encrypt vault: %w", err)
+	}
+	// Stage 3: rotation is complete; drop the backup.
+	_ = os.Remove(s.keyFile + ".bak")
+	return nil
+}
+
 // load reads and decrypts the vault file into memory. A missing vault file
 // is treated as an empty vault; a missing master key is not, because the
-// vault would be unrecoverable.
+// vault would be unrecoverable. Blobs without the format header are treated
+// as the legacy pre-header layout and upgraded on the next save.
 func (s *Store) load() error {
-	content, err := os.ReadFile(s.storeFile)
+	content, err := os.ReadFile(s.storeFile) // #nosec G304 -- path comes from --store flag or the default config dir
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			s.secrets = make(map[string]Secret)
@@ -177,9 +266,14 @@ func (s *Store) load() error {
 		}
 		return fmt.Errorf("read vault: %w", err)
 	}
-	plain, err := decrypt(s.key, content)
+	plain, err := decodeVault(s.key, content)
+	if errors.Is(err, errLegacyVault) {
+		// The file predates the format header; the next save rewrites it
+		// with the versioned header.
+		plain, err = decrypt(s.key, content)
+	}
 	if err != nil {
-		return fmt.Errorf("decrypt vault: %w", err)
+		return s.recoveryHint(fmt.Errorf("decrypt vault: %w", err))
 	}
 	var secrets map[string]Secret
 	if err := json.Unmarshal(plain, &secrets); err != nil {
@@ -192,24 +286,34 @@ func (s *Store) load() error {
 	return nil
 }
 
+// recoveryHint augments a decryption failure with a recovery pointer when a
+// rekey backup exists, since an interrupted Rekey is the usual cause.
+func (s *Store) recoveryHint(err error) error {
+	if _, statErr := os.Stat(s.keyFile + ".bak"); statErr == nil {
+		return fmt.Errorf("%w: an interrupted rekey may have replaced the key; restore the backup with: mv %s %s",
+			err, s.keyFile+".bak", s.keyFile)
+	}
+	return err
+}
+
 // save encrypts and writes the in-memory secrets to the vault file, creating
-// the vault directory with mode 0700 if needed.
+// the vault directory with private permissions if needed.
 func (s *Store) save() error {
 	plain, err := json.Marshal(s.secrets)
 	if err != nil {
 		return fmt.Errorf("encode vault: %w", err)
 	}
-	blob, err := encrypt(s.key, plain)
+	blob, err := encodeVault(s.key, plain)
 	if err != nil {
 		return fmt.Errorf("encrypt vault: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.storeFile), 0o700); err != nil {
-		return fmt.Errorf("create vault directory: %w", err)
+	if err := ensureDir(filepath.Dir(s.storeFile)); err != nil {
+		return err
 	}
-	if err := os.WriteFile(s.storeFile, blob, 0o600); err != nil {
+	if err := writeFileAtomic(s.storeFile, blob); err != nil {
 		return fmt.Errorf("write vault: %w", err)
 	}
-	return nil
+	return hardenFile(s.storeFile)
 }
 
 // expired reports whether the secret has passed its ValidUntil time.

@@ -30,11 +30,13 @@ vulnerability scan on every push and pull request.
 ```
 cmd/gs-secrets/       Thin entry point: parses args, delegates to internal/app
 internal/app/         CLI logic: flag parsing, command dispatch (Run)
-internal/store/       Encrypted vault: AES-256-GCM store, key-file management
+pkg/store/            Public library: encrypted vault, key-file management
 ```
 
 - Business logic lives in `internal/`; `cmd/gs-secrets` stays thin.
-- The `store` package is a library — keep its API documented and tested.
+- The `pkg/store` package is a **public library** (importable from other
+  repositories) — its API must stay documented, tested, and backward
+  compatible. Breaking changes require a major version bump.
 - The `app` package must remain testable: `Run(args, stdout, stderr)` never
   calls `os.Exit` or writes to global state.
 
@@ -50,7 +52,7 @@ internal/store/       Encrypted vault: AES-256-GCM store, key-file management
 
 ## Security-sensitive changes
 
-Crypto code lives in `internal/store/store.go`. Changes to key handling,
+Crypto code lives in `pkg/store/store.go`. Changes to key handling,
 encryption, or file permissions must update [SECURITY.md](./SECURITY.md) and
 add tests for the failure modes (tampered vault, wrong key, missing key
 file).
