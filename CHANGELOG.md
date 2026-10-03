@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-03
+
+### Fixed
+
+- **Process crash when the garbage collector ran the key-memory cleanup**
+  (`unsafe.Slice` on a nil pointer in `pkg/store`). The wipe-on-GC approach
+  via `runtime.AddCleanup` could not work in Go — a cleanup cannot reference
+  the allocation it would wipe, so the registered cleanup received a nil
+  pointer and crashed whenever it ran. Key bytes are now zeroed explicitly
+  when the master key is rotated (`--rekey`).
+
 ## [0.5.0] - 2026-10-03
 
 ### Added
@@ -143,6 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release: `--set key=value [--ttl]` and `--get key` over an
   encrypted file vault, with machine-ID-derived key and AES-CTR encryption.
 
+[0.5.1]: https://github.com/guionardo/gs-secrets/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/guionardo/gs-secrets/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/guionardo/gs-secrets/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/guionardo/gs-secrets/compare/v0.2.0...v0.3.0
