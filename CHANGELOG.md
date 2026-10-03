@@ -48,10 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and windows on amd64 and arm64 (tar.gz, zip for windows), generates
   `checksums.txt` and release notes, and publishes the GitHub release —
   configured in `.goreleaser.yml`, locally testable via `make snapshot`.
-- **Homebrew tap**: stable releases publish a cask to
-  `guionardo/homebrew-tap` (`brew install guionardo/tap/gs-secrets`), with a
-  post-install hook that clears the macOS quarantine attribute. Requires the
-  `HOMEBREW_TAP_TOKEN` secret.
 - **Windows installer script** (`install.ps1`): downloads the release
   archive for the machine architecture, verifies the SHA-256 checksum,
   extracts `gs-secrets.exe` into `%LOCALAPPDATA%\gs-secrets\bin` and adds it

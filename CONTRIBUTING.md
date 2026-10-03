@@ -76,16 +76,11 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Stable tags additionally publish a Homebrew cask to
-[guionardo/homebrew-tap](https://github.com/guionardo/homebrew-tap)
-(`brew install guionardo/tap/gs-secrets`). This requires the
-`HOMEBREW_TAP_TOKEN` repository secret: a PAT with `contents:write` on the
-tap repository. The default `GITHUB_TOKEN` cannot write to another
-repository.
+Stable tags additionally publish the Windows installer entry point:
+`install.ps1` in the repository root stays current with `main`.
 
 Prerelease tags containing a `-` (e.g. `v1.2.3-rc.1`) are published as
-prereleases and are **not** pushed to the tap (`skip_upload: auto`). To test
-a release locally without publishing:
+prereleases. To test a release locally without publishing:
 
 ```bash
 make snapshot   # goreleaser release --snapshot --clean → dist/

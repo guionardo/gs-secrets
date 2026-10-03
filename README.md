@@ -32,12 +32,6 @@ go install github.com/guionardo/gs-secrets/cmd/gs-secrets@latest
 
 ### Install from a release
 
-**macOS (Homebrew)** — once the first release is published:
-
-```bash
-brew install guionardo/tap/gs-secrets
-```
-
 **Windows (PowerShell)** — downloads the right binary for your architecture,
 verifies its SHA-256 checksum, and adds it to your user PATH:
 
@@ -47,7 +41,7 @@ irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | ie
 
 Open a new terminal afterwards, then `gs-secrets --version`.
 
-**Linux / manual** — download the binary for your platform from the
+**Linux / macOS / manual** — download the binary for your platform from the
 [releases page](https://github.com/guionardo/gs-secrets/releases) and verify
 its checksum against `checksums.txt` attached to the release.
 

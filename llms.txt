@@ -24,7 +24,6 @@ gs-secrets --delete github_token
 
 ## Installation
 
-- macOS: `brew install guionardo/tap/gs-secrets`
 - Windows: `irm https://raw.githubusercontent.com/guionardo/gs-secrets/main/install.ps1 | iex`
 - Other: download the release archive for your platform and verify against `checksums.txt`
 
