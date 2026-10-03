@@ -211,6 +211,21 @@ func TestGetEDecodeErrorDoesNotLeak(t *testing.T) {
 	assert.NotContains(t, err.Error(), "super-secret-value-42")
 }
 
+func TestDroppedStoresDoNotCrashOnGC(t *testing.T) {
+	// Creating and dropping many stores discards many key allocations. The
+	// per-key cleanup used to crash the process (unsafe.Slice on a nil
+	// pointer) whenever the garbage collector ran it.
+	for i := 0; i < 25; i++ {
+		s, err := store.New(filepath.Join(t.TempDir(), ".store"))
+		require.NoError(t, err)
+		require.NoError(t, s.Set("k", "v", 0))
+	}
+	for i := 0; i < 8; i++ {
+		runtime.GC()
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
 func TestListSortedAndExcludesExpired(t *testing.T) {
 	s := newTestStore(t)
 	require.NoError(t, s.Set("zeta", "1", 0))

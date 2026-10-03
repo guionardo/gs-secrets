@@ -60,7 +60,10 @@ of silently encrypting data under a fresh, useless key.
   `nonce || ciphertext`. Files written by v0.1.0 (no header) are still
   readable and are upgraded to the header format on the next write.
 - Key: 32 random bytes from `crypto/rand`, generated on first use.
-- Key bytes are zeroed when they become unreachable in process memory.
+- Key bytes are zeroed in memory when the master key is rotated (`--rekey`).
+  A garbage-collection-based wipe is not possible in Go: a cleanup cannot
+  reference the allocation it would wipe, and wiping dead memory via a raw
+  address could corrupt a different allocation that reused the block.
 
 ## Crash safety and key rotation
 

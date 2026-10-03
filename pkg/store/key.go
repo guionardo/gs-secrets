@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
-	"unsafe"
 )
 
 // keySize is the AES-256 master key length in bytes.
@@ -27,7 +25,7 @@ func loadKey(keyFile string) ([]byte, error) {
 		if err := hardenFile(keyFile); err != nil {
 			return nil, err
 		}
-		return registerKeyCleanup(content), nil
+		return content, nil
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read key file: %w", err)
@@ -48,23 +46,18 @@ func loadKey(keyFile string) ([]byte, error) {
 	return key, nil
 }
 
-// newRandomKey generates a fresh 32-byte master key from crypto/rand and
-// registers a cleanup that wipes the bytes once they become unreachable.
+// newRandomKey generates a fresh 32-byte master key from crypto/rand.
+//
+// Key bytes are zeroed when they are replaced (see Rekey) rather than when
+// they become unreachable: runtime.AddCleanup cannot reference the
+// allocation being cleaned up — "if ptr is reachable from cleanup or arg,
+// ptr will never be collected" — so a garbage-collection-based wipe is
+// impossible, and wiping dead memory via a raw address could corrupt a
+// different allocation that reused the block.
 func newRandomKey() ([]byte, error) {
 	key := make([]byte, keySize)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	return registerKeyCleanup(key), nil
-}
-
-// registerKeyCleanup arranges for the key's backing array to be zeroed when
-// it becomes unreachable, shortening the key's lifetime in process memory.
-// keySize is a constant, so the cleanup closure does not capture the slice
-// (capturing it would keep the array alive and the cleanup would never run).
-func registerKeyCleanup(key []byte) []byte {
-	runtime.AddCleanup(&key[0], func(first *byte) { // #nosec G103 -- wipes the key allocation
-		clear(unsafe.Slice(first, keySize))
-	}, nil)
-	return key
+	return key, nil
 }

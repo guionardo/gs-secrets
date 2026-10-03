@@ -283,8 +283,10 @@ func (s *Store) Rekey() error {
 			_ = writeFileAtomic(s.keyFile, oldKey)
 			return fmt.Errorf("re-encrypt vault: %w", err)
 		}
-		// Stage 3: rotation is complete; drop the backup.
+		// Stage 3: rotation is complete; drop the backup and wipe the old key
+		// from memory.
 		_ = os.Remove(s.keyFile + ".bak")
+		clear(oldKey)
 		return nil
 	})
 }
