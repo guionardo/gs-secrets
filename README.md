@@ -3,7 +3,6 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/guionardo/gs-secrets)](https://go.dev/)
 [![License](https://img.shields.io/github/license/guionardo/gs-secrets)](./LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/guionardo/gs-secrets/ci.yml?branch=main)](https://github.com/guionardo/gs-secrets/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/guionardo/gs-secrets)](https://goreportcard.com/report/github.com/guionardo/gs-secrets)
 
 Poor-man's secret vault: a single-file CLI to store and retrieve API keys,
 passwords, and other secrets in an AES-256-GCM encrypted local vault.
