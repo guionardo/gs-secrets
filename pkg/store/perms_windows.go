@@ -5,6 +5,7 @@ package store
 import (
 	"encoding/binary"
 	"fmt"
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -140,3 +141,14 @@ func buildRestrictiveDacl(sids []*windows.SID) (*windows.ACL, []byte, error) {
 // syncDir is a no-op on Windows: the rename in writeFileAtomic is
 // transactional per file on NTFS and there is no portable directory fsync.
 func syncDir(dir string) {}
+
+// lockFile takes an exclusive byte-range lock (LockFileEx) on f.
+func lockFile(f *os.File) error {
+	ol := new(windows.Overlapped)
+	return windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, ol)
+}
+
+// unlockFile releases the byte-range lock taken by lockFile.
+func unlockFile(f *os.File) error {
+	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, new(windows.Overlapped))
+}

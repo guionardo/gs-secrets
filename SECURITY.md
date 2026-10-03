@@ -66,6 +66,9 @@ of silently encrypting data under a fresh, useless key.
 
 - Vault and key files are written atomically (temp file + fsync + rename),
   so an interrupted write never leaves a truncated file.
+- Operations are serialized across processes with an advisory exclusive
+  lock on `<vault file>.lock` (private, like the vault), so concurrent
+  readers/writers never corrupt the vault or lose updates.
 - `gs-secrets --rekey` rotates the master key: the vault is re-encrypted
   with a fresh key and the key file is replaced. The previous key is kept
   as `.gs-secrets.key.bak` until the rotation completes. If a rekey is
@@ -77,6 +80,32 @@ of silently encrypting data under a fresh, useless key.
   ```
 
   Decryption errors hint at this recovery step when a backup is present.
+
+## Secret handling in the CLI
+
+- Secret values are **never** passed as process arguments when written via
+  `--set key` (stdin) or `--set key --prompt` (masked prompt). The inline
+  `--set key=value` form exists only for non-sensitive data.
+- Secret values never appear on stderr, in `--verbose` output, or in error
+  messages.
+- stdout carries only data (the value, key list, version); consumers can
+  capture it directly. See [docs/API.md](docs/API.md) for the full
+  automation contract.
+
+## Backup procedure
+
+Back up the key file **together with** the vault file, on media with
+equivalent access protection:
+
+| Path (default) | Required? |
+| --- | --- |
+| `<user config dir>/gs-secrets/.gs-secrets.key` | Required — without it the vault is unrecoverable |
+| `<user config dir>/gs-secrets/.store` | Required — holds the secrets |
+| `<user config dir>/gs-secrets/.store.lock` | No — recreated on demand |
+
+Losing only the key file means losing the vault. Rotating keys with
+`--rekey` does not invalidate an existing backup that contains the old key
+file version.
 
 ## Reporting a vulnerability
 

@@ -6,8 +6,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,12 +144,90 @@ func TestWrongKeyCannotRead(t *testing.T) {
 }
 
 func TestKeyFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("on Windows a user-restricted DACL is enforced instead of mode bits")
+	}
 	dir := t.TempDir()
 	_, err := store.New(filepath.Join(dir, ".store"))
 	require.NoError(t, err)
 	info, err := os.Stat(filepath.Join(dir, ".gs-secrets.key"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestNewHardensInsecurePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("on Windows a user-restricted DACL is enforced instead of mode bits")
+	}
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s, err := store.New(vaultFile)
+	require.NoError(t, err)
+	require.NoError(t, s.Set("k", "v", 0))
+
+	// Simulate a file that lost its private mode (e.g. copied with a loose
+	// umask): reopening must harden it back to 0600 and still read it.
+	require.NoError(t, os.Chmod(vaultFile, 0o644))
+	s2, err := store.New(vaultFile)
+	require.NoError(t, err)
+	info, err := os.Stat(vaultFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	value, ok := s2.Get("k")
+	assert.True(t, ok)
+	assert.Equal(t, "v", value)
+}
+
+func TestLockFileCreatedAndPrivate(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Set("k", "v", 0))
+	info, err := os.Stat(s.LockFile())
+	require.NoError(t, err)
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
+}
+
+func TestConcurrentProcessAccess(t *testing.T) {
+	dir := t.TempDir()
+	vaultFile := filepath.Join(dir, ".store")
+	s1, err := store.New(vaultFile)
+	require.NoError(t, err)
+	s2, err := store.New(vaultFile)
+	require.NoError(t, err)
+
+	// Two Store instances (two open file descriptions) racing on the same
+	// vault: the inter-process lock serializes the read-modify-write cycles,
+	// so no update is lost and the vault stays valid.
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	for i := 0; i < 5; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			if err := s1.Set(fmt.Sprintf("k%d", i), "v", 0); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			if err := s2.Set(fmt.Sprintf("kb%d", i), "v", 0); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	require.Empty(t, errs)
+
+	keys := s1.List()
+	require.Len(t, keys, 10)
 }
 
 func TestConcurrentAccess(t *testing.T) {
@@ -261,6 +342,9 @@ func TestRekeyWithoutVault(t *testing.T) {
 }
 
 func TestRekeyFailureKeepsOldKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory read-only enforcement differs on Windows; DACL tests run there")
+	}
 	dir := t.TempDir()
 	keyDir := t.TempDir()
 	vaultFile := filepath.Join(dir, ".store")

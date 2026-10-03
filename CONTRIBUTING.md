@@ -15,7 +15,7 @@ merge in under ten minutes.
 git clone https://github.com/guionardo/gs-secrets.git
 cd gs-secrets
 
-make test    # go test -race -cover ./...
+make test    # go test -race -cover ./... (includes CLI integration tests)
 make lint    # golangci-lint run ./...
 make vet     # go vet ./...
 make build   # builds bin/gs-secrets with the current git version
@@ -23,7 +23,9 @@ make build   # builds bin/gs-secrets with the current git version
 
 All checks must pass before a PR is merged. The CI pipeline
 (`.github/workflows/ci.yml`) runs test, lint, and a `govulncheck`
-vulnerability scan on every push and pull request.
+vulnerability scan on every push and pull request — tests run on the
+**ubuntu, macOS, and Windows** runners, so platform-specific permission
+code (Unix modes, Windows DACL) is exercised on every change.
 
 ## Project layout
 

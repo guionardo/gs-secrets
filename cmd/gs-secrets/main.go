@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	if err := app.Run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := app.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "gs-secrets: %v\n", err)
 		os.Exit(1)
 	}

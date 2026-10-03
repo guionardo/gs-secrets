@@ -5,6 +5,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"syscall"
 )
 
 // restrictFilePermissions makes path readable and writable only by its
@@ -41,4 +42,14 @@ func syncDir(dir string) {
 		_ = d.Sync()
 		_ = d.Close()
 	}
+}
+
+// lockFile takes an exclusive advisory lock (flock) on f.
+func lockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+}
+
+// unlockFile releases the advisory lock taken by lockFile.
+func unlockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

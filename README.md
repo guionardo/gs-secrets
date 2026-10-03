@@ -57,6 +57,7 @@ make test           # run the test suite with the race detector
 
 ```
 gs-secrets --set key=value [--ttl DURATION] [--store PATH] [--keyfile PATH]
+gs-secrets --set key [--prompt] [--ttl DURATION] [--store PATH] [--keyfile PATH]
 gs-secrets --get key [--output FILE] [--store PATH] [--keyfile PATH]
 gs-secrets --delete key [--store PATH] [--keyfile PATH]
 gs-secrets --list [--store PATH] [--keyfile PATH]
@@ -64,9 +65,16 @@ gs-secrets --rekey [--store PATH] [--keyfile PATH]
 gs-secrets --version
 ```
 
+**Never pass secrets as command-line arguments.** Use `--set key` to feed
+the value via stdin, or `--set key --prompt` for a masked terminal prompt.
+The inline `--set key=value` form exists only for non-sensitive data — the
+value would be visible in the process argument list.
+
 | Flag | Description |
 | --- | --- |
-| `--set key=value` | Store a secret. With `--ttl`, it expires after the given duration. |
+| `--set key=value` | Store a secret inline (non-sensitive values only — visible in process args). With `--ttl`, it expires after the given duration. |
+| `--set key` | Store a secret reading the value from stdin; the secret never appears in process arguments. |
+| `--set key --prompt` | Store a secret from a masked terminal prompt (no echo, no process args). |
 | `--get key` | Print the secret value to stdout (or `--output FILE`). |
 | `--delete key` | Remove a secret. Deleting a missing key is not an error. |
 | `--list` | List stored keys, sorted, never values. |
@@ -75,7 +83,7 @@ gs-secrets --version
 | `--store PATH` | Vault file. Default: `<user config dir>/gs-secrets/.store`. |
 | `--keyfile PATH` | Master key file. Default: `<vault dir>/.gs-secrets.key`. |
 | `--output FILE` | Write command output to FILE instead of stdout. |
-| `--verbose` | Print progress messages to stderr. |
+| `--verbose` | Print progress messages to stderr (never secret values). |
 | `--version` | Print the version and exit. |
 
 Exit code is `0` on success and `1` on any error, including a missing secret.
@@ -83,8 +91,11 @@ Exit code is `0` on success and `1` on any error, including a missing secret.
 ### Examples
 
 ```bash
-# Store a secret that expires in one hour
-gs-secrets --set api_key=abcd1234 --ttl 1h
+# Store a secret that expires in one hour, without exposing it in process args
+printf '%s' "$TOKEN" | gs-secrets --set api_key --ttl 1h
+
+# Masked interactive prompt
+gs-secrets --set db_password --prompt
 
 # Use a project-local vault instead of the user-global one
 gs-secrets --set db_password=secret --store ./vault/.store
@@ -95,6 +106,9 @@ gs-secrets --get api_key | curl -H "Authorization: Bearer $(cat)" ...
 # Write a secret straight to a file
 gs-secrets --get api_key --output /tmp/key
 ```
+
+For automation contracts (stdout purity, exit codes, safe stdin capture,
+Node.js example) see [docs/API.md](docs/API.md).
 
 ## Using as a library
 

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Secret input without process-argument exposure**: `--set key` reads the
+  value from stdin, `--set key --prompt` reads it from a masked terminal
+  prompt (`golang.org/x/term`). Error messages no longer echo `--set`
+  arguments (they could contain values).
+- **Inter-process serialization**: every store operation takes an advisory
+  exclusive lock on `<vault file>.lock` (flock on Unix, LockFileEx on
+  Windows), so concurrent processes cannot corrupt the vault or lose
+  updates.
+- **Integration contract documentation** (`docs/API.md`): public API
+  versioning policy, vault format compatibility, stdout/stderr contract for
+  automation, safe stdin capture (with Node.js example), concurrency and
+  key-lifecycle behavior, and per-platform permission enforcement.
+- **Integration tests**: a Go process writes through `pkg/store` and the CLI
+  binary reads (and vice versa, including stdin-fed values), asserting
+  stdout purity and that secret values never reach stderr.
+- **Platform test matrix in CI**: tests now run on ubuntu, macOS, and
+  Windows runners, exercising the Unix mode enforcement and the Windows DACL
+  code paths.
+
+### Changed
+
+- `app.Run` now takes the input stream explicitly (`Run(args, stdin, stdout,
+  stderr)`).
+
 ## [0.2.0] - 2026-10-03
 
 ### Security

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/guionardo/gs-secrets/pkg/store"
 )
 
@@ -32,22 +34,26 @@ var ErrMultipleCommands = errors.New("specify exactly one command: --set, --get,
 
 // options holds the parsed flags of a single invocation.
 type options struct {
-	command    string // set | get | delete | list | rekey
-	key        string
-	value      string
-	ttl        time.Duration
-	storeFile  string
-	keyFile    string
-	outputFile string
-	verbose    bool
-	version    bool
-	rekey      bool
+	command        string // set | get | delete | list | rekey
+	key            string
+	value          string
+	valueFromStdin bool
+	prompt         bool
+	ttl            time.Duration
+	storeFile      string
+	keyFile        string
+	outputFile     string
+	verbose        bool
+	version        bool
+	rekey          bool
 }
 
-// Run executes the gs-secrets CLI with the given arguments. stdout receives
-// command output (secret values, key lists, version); stderr receives
-// diagnostics and verbose messages.
-func Run(args []string, stdout, stderr io.Writer) error {
+// Run executes the gs-secrets CLI with the given arguments. stdin provides
+// secret values for `--set key` (or the masked prompt); stdout receives
+// command output (secret values, key lists, version) and nothing else;
+// stderr receives diagnostics and verbose messages. Secret values never
+// appear on stderr or in returned errors.
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	opts, err := parseFlags(args, stderr)
 	if err != nil {
 		return err
@@ -81,19 +87,14 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return execute(opts, s, out, stderr)
+	return execute(opts, s, stdin, out, stderr)
 }
 
 // execute runs the selected command against the store.
-func execute(opts *options, s *store.Store, out, stderr io.Writer) error {
+func execute(opts *options, s *store.Store, stdin io.Reader, out, stderr io.Writer) error {
 	switch opts.command {
 	case "set":
-		if err := s.Set(opts.key, opts.value, opts.ttl); err != nil {
-			return err
-		}
-		if opts.verbose {
-			fmt.Fprintf(stderr, "secret set: %s\n", opts.key)
-		}
+		return executeSet(opts, s, stdin, stderr)
 	case "get":
 		value, ok := s.Get(opts.key)
 		if !ok {
@@ -154,6 +155,7 @@ Flags:
 	fs.StringVar(&deleteArg, "delete", "", "delete the secret for a key")
 	fs.BoolVar(&list, "list", false, "list stored keys")
 	fs.BoolVar(&opts.rekey, "rekey", false, "rotate the master key and re-encrypt the vault")
+	fs.BoolVar(&opts.prompt, "prompt", false, "read the secret value for --set from a masked terminal prompt instead of stdin")
 	fs.BoolVar(&opts.version, "version", false, "print version and exit")
 	fs.DurationVar(&opts.ttl, "ttl", 0, "time to live for a secret set with --set (e.g. 1h, 30m); 0 means never expire")
 	fs.StringVar(&opts.storeFile, "store", "", "path to the secrets vault (default: <user config dir>/gs-secrets/.store)")
@@ -168,9 +170,12 @@ Flags:
 	}
 
 	var err error
-	opts.key, opts.value, err = parseSet(setArg)
+	opts.key, opts.value, opts.valueFromStdin, err = parseSet(setArg)
 	if err != nil {
 		return nil, err
+	}
+	if opts.prompt && !opts.valueFromStdin {
+		return nil, errors.New("--prompt can only be used with --set key (no inline value)")
 	}
 	if err := validateCommands(setArg != "", getArg != "", deleteArg != "", list, opts.rekey); err != nil {
 		if errors.Is(err, ErrNoCommand) {
@@ -197,19 +202,75 @@ Flags:
 
 // parseSet splits a --set argument into key and value. An empty --set
 // argument is not an error; the caller validates command selection.
-func parseSet(setArg string) (key, value string, err error) {
+//
+// Two forms are supported:
+//
+//	--set key=value   inline value (convenient for non-sensitive data)
+//	--set key         value read from stdin (or a --prompt); keeps the
+//	                  secret out of the process argument list
+//
+// Error messages never include the argument, because it may contain a
+// secret value.
+func parseSet(setArg string) (key, value string, fromStdin bool, err error) {
 	if setArg == "" {
-		return "", "", nil
+		return "", "", false, nil
 	}
-	k, v, ok := strings.Cut(setArg, "=")
-	if !ok {
-		return "", "", fmt.Errorf("invalid --set %q: expected key=value", setArg)
-	}
+	k, v, hasValue := strings.Cut(setArg, "=")
 	key = strings.TrimSpace(k)
 	if key == "" {
-		return "", "", fmt.Errorf("invalid --set %q: key cannot be empty", setArg)
+		return "", "", false, errors.New("invalid --set: key cannot be empty")
 	}
-	return key, strings.TrimSpace(v), nil
+	if !hasValue {
+		return key, "", true, nil
+	}
+	return key, strings.TrimSpace(v), false, nil
+}
+
+// executeSet stores a secret, resolving the value from the inline flag,
+// stdin, or the masked prompt as selected during parsing.
+func executeSet(opts *options, s *store.Store, stdin io.Reader, stderr io.Writer) error {
+	value := opts.value
+	if opts.valueFromStdin {
+		v, err := readSecret(stdin, opts.prompt, stderr)
+		if err != nil {
+			return err
+		}
+		value = v
+	}
+	if err := s.Set(opts.key, value, opts.ttl); err != nil {
+		return err
+	}
+	if opts.verbose {
+		fmt.Fprintf(stderr, "secret set: %s\n", opts.key)
+	}
+	return nil
+}
+
+// readSecret obtains the value for --set key: either from the masked
+// terminal prompt (--prompt) or by consuming stdin to EOF. With --prompt the
+// input must be a terminal; otherwise the caller would not see the echo
+// suppression and might assume the input was read.
+func readSecret(stdin io.Reader, prompt bool, stderr io.Writer) (string, error) {
+	if prompt {
+		f, ok := stdin.(*os.File)
+		if !ok || !term.IsTerminal(int(f.Fd())) {
+			return "", errors.New("--prompt requires an interactive terminal")
+		}
+		b, err := term.ReadPassword(int(f.Fd()))
+		if err != nil {
+			return "", fmt.Errorf("read password: %w", err)
+		}
+		fmt.Fprintln(stderr)
+		return string(b), nil
+	}
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("read secret from stdin: %w", err)
+	}
+	value := string(data)
+	value = strings.TrimSuffix(value, "\n")
+	value = strings.TrimSuffix(value, "\r")
+	return value, nil
 }
 
 // validateCommands enforces that exactly one command flag was provided.

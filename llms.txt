@@ -6,6 +6,7 @@
 ## Documentation
 
 - [README.md](README.md) — overview, installation, usage, and examples
+- [docs/API.md](docs/API.md) — integration contract: public API, CLI automation, concurrency
 - [SECURITY.md](SECURITY.md) — threat model, file permissions, encryption details
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and PR process
 - [CHANGELOG.md](CHANGELOG.md) — version history (Keep a Changelog)

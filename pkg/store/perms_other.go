@@ -31,3 +31,9 @@ func verifyFilePermissions(path string) error {
 
 // syncDir is a no-op on platforms without directory fsync support.
 func syncDir(dir string) {}
+
+// lockFile and unlockFile are no-ops on platforms without file locking
+// support (e.g. plan9); concurrent access is then not serialized.
+func lockFile(f *os.File) error { return nil }
+
+func unlockFile(f *os.File) error { return nil }

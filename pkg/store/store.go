@@ -69,9 +69,12 @@ type Secret struct {
 }
 
 // Store is a thread-safe, encrypted secret vault backed by a single file.
+// Access is also serialized across processes with an advisory file lock on
+// <vault file>.lock (see lock.go).
 type Store struct {
 	mu        sync.RWMutex
 	storeFile string
+	lockFile  string
 	keyFile   string
 	key       []byte
 	secrets   map[string]Secret
@@ -99,6 +102,7 @@ func WithKeyFile(keyFile string) Option {
 func New(storeFile string, opts ...Option) (*Store, error) {
 	s := &Store{
 		storeFile: storeFile,
+		lockFile:  storeFile + ".lock",
 		keyFile:   filepath.Join(filepath.Dir(storeFile), ".gs-secrets.key"),
 		secrets:   make(map[string]Secret),
 	}
@@ -134,24 +138,35 @@ func (s *Store) KeyFile() string {
 	return s.keyFile
 }
 
+// LockFile returns the absolute path of the inter-process lock file.
+func (s *Store) LockFile() string {
+	return s.lockFile
+}
+
 // Get returns the value for key and whether it exists. Expired secrets are
 // treated as missing and removed from the in-memory copy; the cleanup is
 // persisted on the next Set or Delete.
 func (s *Store) Get(key string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.load(); err != nil {
-		return "", false
-	}
-	secret, ok := s.secrets[key]
-	if !ok {
-		return "", false
-	}
-	if secret.expired(time.Now()) {
-		delete(s.secrets, key)
-		return "", false
-	}
-	return secret.Value, true
+	found := false
+	var value string
+	_ = s.withFileLock(func() error {
+		if err := s.load(); err != nil {
+			return err
+		}
+		secret, ok := s.secrets[key]
+		if !ok {
+			return nil
+		}
+		if secret.expired(time.Now()) {
+			delete(s.secrets, key)
+			return nil
+		}
+		value, found = secret.Value, true
+		return nil
+	})
+	return value, found
 }
 
 // Set stores value under key, replacing any existing entry. A positive ttl
@@ -163,44 +178,51 @@ func (s *Store) Set(key, value string, ttl time.Duration) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.load(); err != nil {
-		return err
-	}
-	validUntil := int64(0)
-	if ttl > 0 {
-		validUntil = time.Now().Add(ttl).UnixMilli()
-	}
-	s.secrets[key] = Secret{Value: value, ValidUntil: validUntil}
-	return s.save()
+	return s.withFileLock(func() error {
+		if err := s.load(); err != nil {
+			return err
+		}
+		validUntil := int64(0)
+		if ttl > 0 {
+			validUntil = time.Now().Add(ttl).UnixMilli()
+		}
+		s.secrets[key] = Secret{Value: value, ValidUntil: validUntil}
+		return s.save()
+	})
 }
 
 // Delete removes key from the vault. Deleting a missing key is not an error.
 func (s *Store) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.load(); err != nil {
-		return err
-	}
-	delete(s.secrets, key)
-	return s.save()
+	return s.withFileLock(func() error {
+		if err := s.load(); err != nil {
+			return err
+		}
+		delete(s.secrets, key)
+		return s.save()
+	})
 }
 
 // List returns all stored keys in sorted order. Expired keys are excluded.
 func (s *Store) List() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.load(); err != nil {
-		return nil
-	}
-	keys := make([]string, 0, len(s.secrets))
-	now := time.Now()
-	for k, secret := range s.secrets {
-		if secret.expired(now) {
-			delete(s.secrets, k)
-			continue
+	keys := []string{}
+	_ = s.withFileLock(func() error {
+		if err := s.load(); err != nil {
+			return err
 		}
-		keys = append(keys, k)
-	}
+		now := time.Now()
+		for k, secret := range s.secrets {
+			if secret.expired(now) {
+				delete(s.secrets, k)
+				continue
+			}
+			keys = append(keys, k)
+		}
+		return nil
+	})
 	slices.Sort(keys)
 	return keys
 }
@@ -215,42 +237,44 @@ func (s *Store) List() []string {
 func (s *Store) Rekey() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := os.Stat(s.storeFile); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return ErrNoVault
+	return s.withFileLock(func() error {
+		if _, err := os.Stat(s.storeFile); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return ErrNoVault
+			}
+			return fmt.Errorf("stat vault: %w", err)
 		}
-		return fmt.Errorf("stat vault: %w", err)
-	}
-	if err := s.load(); err != nil {
-		return fmt.Errorf("read vault before rekey: %w", err)
-	}
-	oldKey := s.key
-	newKey, err := newRandomKey()
-	if err != nil {
-		return fmt.Errorf("generate new master key: %w", err)
-	}
+		if err := s.load(); err != nil {
+			return fmt.Errorf("read vault before rekey: %w", err)
+		}
+		oldKey := s.key
+		newKey, err := newRandomKey()
+		if err != nil {
+			return fmt.Errorf("generate new master key: %w", err)
+		}
 
-	// Stage 1: persist the backup of the old key, then replace the key file.
-	if err := writeFileAtomic(s.keyFile+".bak", oldKey); err != nil {
-		return fmt.Errorf("backup old master key: %w", err)
-	}
-	if err := hardenFile(s.keyFile + ".bak"); err != nil {
-		return fmt.Errorf("harden key backup: %w", err)
-	}
-	if err := writeFileAtomic(s.keyFile, newKey); err != nil {
-		return fmt.Errorf("write new master key: %w", err)
-	}
-	// Stage 2: re-encrypt the vault with the new key. On failure, restore
-	// the old key so the old vault stays readable.
-	s.key = newKey
-	if err := s.save(); err != nil {
-		s.key = oldKey
-		_ = writeFileAtomic(s.keyFile, oldKey)
-		return fmt.Errorf("re-encrypt vault: %w", err)
-	}
-	// Stage 3: rotation is complete; drop the backup.
-	_ = os.Remove(s.keyFile + ".bak")
-	return nil
+		// Stage 1: persist the backup of the old key, then replace the key file.
+		if err := writeFileAtomic(s.keyFile+".bak", oldKey); err != nil {
+			return fmt.Errorf("backup old master key: %w", err)
+		}
+		if err := hardenFile(s.keyFile + ".bak"); err != nil {
+			return fmt.Errorf("harden key backup: %w", err)
+		}
+		if err := writeFileAtomic(s.keyFile, newKey); err != nil {
+			return fmt.Errorf("write new master key: %w", err)
+		}
+		// Stage 2: re-encrypt the vault with the new key. On failure, restore
+		// the old key so the old vault stays readable.
+		s.key = newKey
+		if err := s.save(); err != nil {
+			s.key = oldKey
+			_ = writeFileAtomic(s.keyFile, oldKey)
+			return fmt.Errorf("re-encrypt vault: %w", err)
+		}
+		// Stage 3: rotation is complete; drop the backup.
+		_ = os.Remove(s.keyFile + ".bak")
+		return nil
+	})
 }
 
 // load reads and decrypts the vault file into memory. A missing vault file
