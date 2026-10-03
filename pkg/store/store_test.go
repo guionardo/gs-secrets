@@ -58,13 +58,17 @@ func TestSetEmptyKey(t *testing.T) {
 
 func TestTTLExpiry(t *testing.T) {
 	s := newTestStore(t)
-	require.NoError(t, s.Set("ephemeral", "value", 10*time.Millisecond))
-
+	// Long TTL: the secret is present right after being stored, with a wide
+	// margin for slow CI runners.
+	require.NoError(t, s.Set("ephemeral", "value", 10*time.Second))
 	value, ok := s.Get("ephemeral")
 	assert.True(t, ok)
 	assert.Equal(t, "value", value)
 
-	time.Sleep(20 * time.Millisecond)
+	// Short TTL: the secret is gone once the expiry passes. The sleep gives
+	// slow CI runners (e.g. Windows with antivirus scanning) ample margin.
+	require.NoError(t, s.Set("ephemeral", "value", 10*time.Millisecond))
+	time.Sleep(100 * time.Millisecond)
 	value, ok = s.Get("ephemeral")
 	assert.False(t, ok)
 	assert.Empty(t, value)
